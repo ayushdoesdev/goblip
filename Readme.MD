@@ -9,6 +9,21 @@ Run your Gin server with goblip -- go run . and enjoy automatic reload on file c
 
 ---
 
+💡 **Why GoBlip?**
+
+The best part — **GoBlip uses zero external libraries.**  
+It’s built entirely with the **Go standard library**, which makes it:
+
+- ⚡ **Fast:** minimal overhead and instant startup  
+- 🔒 **Safe:** no dependency vulnerabilities or supply-chain risks  
+- 🧩 **Stable:** powered only by Go’s well-supported core packages  
+- 🛠️ **Long-term reliable:** works across all future Go versions without maintenance headaches  
+
+This means GoBlip will keep working for years — fast, clean, and dependency-free.
+
+
+---
+
 ## 🚀 Features
 
 - No external dependencies — just Go’s standard library

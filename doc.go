@@ -2,6 +2,9 @@
 // utility for Go development. It automatically detects source changes
 // and restarts a running process, similar to nodemon or air.
 //
+// GoBlip is implemented entirely with Go's standard library — no external dependencies.
+// This makes it fast, lightweight, and future-proof, with zero external maintenance overhead.
+//
 // GoBlip is designed for fast, simple local development of Go applications,
 // web servers, or CLI tools. It works entirely with the Go standard library
 // and uses polling (not fsnotify) for maximum cross-platform compatibility.

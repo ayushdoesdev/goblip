@@ -49,3 +49,20 @@ goblip -v -- go run main.go
 # Custom poll interval and extensions
 goblip -interval 250ms -ext ".go,.tpl" -- go run .
 ```
+
+## 🤝 Contributing
+
+Contributions are welcome!
+
+1. **Fork** the repository  
+2. **Create a feature branch:**
+```bash
+   git checkout -b feature/your-feature
+```
+3. Make your changes
+4. Run formatting and vet:
+```bash
+  go fmt ./...
+  go vet ./...
+```
+5. Commit and open a Pull Request

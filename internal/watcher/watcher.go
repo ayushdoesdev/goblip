@@ -1,142 +1,126 @@
 package watcher
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
-
-	"github.com/ayushdoesdev/goblip/internal/runner"
 )
 
-// Options holds configuration for the watcher.
-type Options struct {
-	Root       string
-	Extensions string
-	Interval   time.Duration
-	Verbose    bool
-	RunCommand string
-}
-
-// Watcher monitors files and restarts the runner on changes.
+// Watcher polls the filesystem and emits restart notifications when files change.
 type Watcher struct {
-	opts    Options
-	runner  *runner.Runner
-	stopCh  chan struct{}
-	stopped chan struct{}
+	Interval  time.Duration
+	Exts      map[string]struct{}
+	IgnoreVcs bool
+	Verbose   bool
 }
 
-// New creates a new Watcher.
-func New(opts Options, r *runner.Runner) *Watcher {
-	if opts.Root == "" {
-		opts.Root = "."
-	}
-	if opts.Interval <= 0 {
-		opts.Interval = 500 * time.Millisecond
-	}
+func New(interval time.Duration, exts map[string]struct{}, ignoreVcs, verbose bool) *Watcher {
 	return &Watcher{
-		opts:    opts,
-		runner:  r,
-		stopCh:  make(chan struct{}),
-		stopped: make(chan struct{}),
+		Interval:  interval,
+		Exts:      exts,
+		IgnoreVcs: ignoreVcs,
+		Verbose:   verbose,
 	}
 }
 
-// Run starts the watcher loop.
-func (w *Watcher) Run() error {
-	extMap := parseExts(w.opts.Extensions)
-	mtimes, err := scanFiles(w.opts.Root, extMap)
-	if err != nil {
-		return err
-	}
-
-	if err := w.runner.Start(w.opts.RunCommand); err != nil {
-		return fmt.Errorf("initial start failed: %w", err)
-	}
-
-	ticker := time.NewTicker(w.opts.Interval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			newTimes, _ := scanFiles(w.opts.Root, extMap)
-			if changed(mtimes, newTimes) {
-				if w.opts.Verbose {
-					fmt.Println("[GoBlip] change detected — restarting")
-				}
-				mtimes = newTimes
-				w.runner.Stop()
-				time.Sleep(100 * time.Millisecond)
-				if err := w.runner.Start(w.opts.RunCommand); err != nil {
-					return fmt.Errorf("failed to restart command: %w", err)
-				}
-			}
-		case <-w.stopCh:
-			close(w.stopped)
-			return nil
-		}
-	}
-}
-
-// Stop signals the watcher to stop.
-func (w *Watcher) Stop() {
-	select {
-	case <-w.stopCh:
-	default:
-		close(w.stopCh)
-		<-w.stopped
-	}
-}
-
-// ---------------- Helpers ----------------
-
-func parseExts(s string) map[string]struct{} {
-	m := make(map[string]struct{})
-	for _, e := range strings.Split(s, ",") {
-		e = strings.TrimSpace(e)
-		if e == "" {
+// ParseExts turns a comma-separated list into a map for quick checks
+func ParseExts(s string) map[string]struct{} {
+	out := make(map[string]struct{})
+	for _, p := range strings.Split(s, ",") {
+		p = strings.TrimSpace(p)
+		if p == "" {
 			continue
 		}
-		if !strings.HasPrefix(e, ".") {
-			e = "." + e
+		if !strings.HasPrefix(p, ".") {
+			p = "." + p
 		}
-		m[e] = struct{}{}
+		out[p] = struct{}{}
 	}
-	return m
+	return out
 }
 
-func scanFiles(root string, exts map[string]struct{}) (map[string]time.Time, error) {
-	out := make(map[string]time.Time)
-	if root == "" {
-		root = "."
+// Start begins watching and returns a channel that receives when a restart should occur.
+// The channel is closed when ctx is cancelled.
+func (w *Watcher) Start(ctx context.Context) (<-chan struct{}, error) {
+	restartCh := make(chan struct{}, 1)
+
+	mtimes, err := scanFiles(".", w.Exts, w.IgnoreVcs)
+	if err != nil {
+		return nil, fmt.Errorf("initial scan error: %w", err)
 	}
-	filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+
+	go func() {
+		ticker := time.NewTicker(w.Interval)
+		defer ticker.Stop()
+		defer close(restartCh)
+		for {
+			select {
+			case <-ticker.C:
+				new, err := scanFiles(".", w.Exts, w.IgnoreVcs)
+				if err != nil {
+					if w.Verbose {
+						fmt.Fprintf(os.Stderr, "scan error: %v\n", err)
+					}
+					continue
+				}
+				if changed(mtimes, new) {
+					if w.Verbose {
+						fmt.Println("change detected, signaling restart")
+					}
+					mtimes = new
+					select {
+					case restartCh <- struct{}{}:
+					default:
+					}
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	return restartCh, nil
+}
+
+// scanFiles walks directory and records mod times for files with matching extensions
+func scanFiles(root string, exts map[string]struct{}, ignoreVcs bool) (map[string]time.Time, error) {
+	out := make(map[string]time.Time)
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
+			// skip files we can't stat
 			return nil
 		}
 		if info.IsDir() {
 			base := filepath.Base(path)
-			if base == ".git" || strings.HasPrefix(base, ".") {
+			if ignoreVcs && (base == ".git" || base == ".hg" || base == ".svn") {
+				return filepath.SkipDir
+			}
+			if strings.HasPrefix(base, ".") && base != "." {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if _, ok := exts[filepath.Ext(path)]; ok {
+		ext := filepath.Ext(path)
+		if _, ok := exts[ext]; ok {
 			out[path] = info.ModTime()
 		}
 		return nil
 	})
-	return out, nil
+	return out, err
 }
 
-func changed(a, b map[string]time.Time) bool {
-	if len(a) != len(b) {
+// changed compares two mtimes maps; returns true if any file was added, removed, or modtime changed.
+func changed(old, now map[string]time.Time) bool {
+	if len(old) != len(now) {
 		return true
 	}
-	for k, v := range b {
-		if av, ok := a[k]; !ok || !av.Equal(v) {
+	for k, v := range now {
+		if ov, ok := old[k]; !ok {
+			return true
+		} else if !v.Equal(ov) {
 			return true
 		}
 	}

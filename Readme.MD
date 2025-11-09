@@ -23,6 +23,11 @@ Clone or install:
 go install github.com/ayushdoesdev/goblip/cmd/goblip@latest
 ```
 
+Make sure your Go bin directory is in your PATH:
+```bash
+export PATH="$PATH:$(go env GOPATH)/bin"
+```
+
 ---
 
 ## 🧠 Usage

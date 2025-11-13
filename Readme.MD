@@ -7,6 +7,7 @@ It detects file changes (“blips”) and restarts your Go app automatically.
 
 Run your Gin server with goblip -- go run . and enjoy automatic reload on file changes.
 
+### v1.0.0 Released
 ---
 
 💡 **Why GoBlip?**
